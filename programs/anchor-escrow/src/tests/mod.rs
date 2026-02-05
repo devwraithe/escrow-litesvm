@@ -309,4 +309,50 @@ mod tests {
         msg!("CUs Consumed: {}", tx.compute_units_consumed);
         msg!("Tx Signature: {}", tx.signature);
     }
+
+    #[test]
+    fn test_refund() {
+        let (mut program, setup_state, _tx) = setup_with_make();
+
+        let payer = setup_state.payer;
+        let maker = setup_state.maker;
+        let vault = setup_state.vault;
+        let escrow = setup_state.escrow;
+        let mint_a = setup_state.mint_a;
+        let maker_ata_a = setup_state.maker_ata_a;
+
+        // Define program IDs for associated token program, token program, and system program
+        let token_program = TOKEN_PROGRAM_ID;
+        let system_program = SYSTEM_PROGRAM_ID;
+
+        // Create the "Refund" instruction to accept and send tokens
+        let refund_ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: crate::accounts::Refund {
+                maker: maker,
+                mint_a: mint_a,
+                maker_ata_a: maker_ata_a,
+                escrow: escrow,
+                vault: vault,
+                token_program: token_program,
+                system_program: system_program,
+            }
+            .to_account_metas(None),
+            data: crate::instruction::Refund {}.data(),
+        };
+
+        // Create and send the transaction containing the "Refund" instruction
+        let message = Message::new(&[refund_ix], Some(&maker));
+        let recent_blockhash = program.latest_blockhash();
+
+        let transaction = Transaction::new(&[&payer], message, recent_blockhash);
+
+        // Send the transaction and capture the result
+        let tx = program.send_transaction(transaction).unwrap();
+
+        // Log transaction details
+        msg!("\n\nRefund transaction successful");
+        msg!("CUs Consumed: {}", tx.compute_units_consumed);
+        msg!("Tx Signature: {}", tx.signature);
+    }
 }
