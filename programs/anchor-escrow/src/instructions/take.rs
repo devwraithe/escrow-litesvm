@@ -1,5 +1,11 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{associated_token::AssociatedToken, token_interface::{Mint, TokenAccount, TokenInterface, TransferChecked, transfer_checked, CloseAccount, close_account}};
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{
+        close_account, transfer_checked, CloseAccount, Mint, TokenAccount, TokenInterface,
+        TransferChecked,
+    },
+};
 
 use crate::state::Escrow;
 
@@ -77,7 +83,7 @@ impl<'info> Take<'info> {
             b"escrow",
             self.maker.key.as_ref(),
             &self.escrow.seed.to_le_bytes()[..],
-            &[self.escrow.bump]
+            &[self.escrow.bump],
         ]];
 
         let cpi_program = self.token_program.to_account_info();
