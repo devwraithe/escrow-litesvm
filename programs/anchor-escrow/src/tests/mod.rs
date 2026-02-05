@@ -3,8 +3,9 @@ mod tests {
 
     use {
         anchor_lang::{
-            prelude::msg, solana_program::program_pack::Pack, AccountDeserialize, InstructionData,
-            ToAccountMetas,
+            prelude::{msg, Clock},
+            solana_program::program_pack::Pack,
+            AccountDeserialize, InstructionData, ToAccountMetas,
         },
         anchor_spl::{
             associated_token::{self, spl_associated_token_account},
@@ -25,7 +26,7 @@ mod tests {
         solana_sdk_ids::system_program::ID as SYSTEM_PROGRAM_ID,
         solana_signer::Signer,
         solana_transaction::Transaction,
-        std::{path::PathBuf, str::FromStr},
+        std::{future, path::PathBuf, str::FromStr},
     };
 
     static PROGRAM_ID: Pubkey = crate::ID;
@@ -352,6 +353,62 @@ mod tests {
 
         // Log transaction details
         msg!("\n\nRefund transaction successful");
+        msg!("CUs Consumed: {}", tx.compute_units_consumed);
+        msg!("Tx Signature: {}", tx.signature);
+    }
+
+    #[test]
+    fn test_refund_after_delay() {
+        let (mut program, setup_state, _tx) = setup_with_make();
+
+        let payer = setup_state.payer;
+        let maker = setup_state.maker;
+        let vault = setup_state.vault;
+        let escrow = setup_state.escrow;
+        let mint_a = setup_state.mint_a;
+        let maker_ata_a = setup_state.maker_ata_a;
+
+        // Define program IDs for associated token program, token program, and system program
+        let token_program = TOKEN_PROGRAM_ID;
+        let system_program = SYSTEM_PROGRAM_ID;
+
+        // Create the "Refund" instruction to accept and send tokens
+        let refund_ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: crate::accounts::Refund {
+                maker: maker,
+                mint_a: mint_a,
+                maker_ata_a: maker_ata_a,
+                escrow: escrow,
+                vault: vault,
+                token_program: token_program,
+                system_program: system_program,
+            }
+            .to_account_metas(None),
+            data: crate::instruction::Refund {}.data(),
+        };
+
+        // Create and send the transaction containing the "Refund" instruction
+        let message = Message::new(&[refund_ix], Some(&maker));
+        let recent_blockhash = program.latest_blockhash();
+
+        let transaction = Transaction::new(&[&payer], message, recent_blockhash);
+
+        // Send the transaction and capture the result
+        let tx = program.send_transaction(transaction).unwrap();
+
+        // Time travelling
+        let mut clock = program.get_sysvar::<Clock>();
+        let current_timestamp = clock.unix_timestamp;
+        let five_days = 5 * 24 * 60 * 60;
+        let time_jump = current_timestamp + five_days;
+
+        // update timestamp
+        clock.unix_timestamp = time_jump;
+        program.set_sysvar::<Clock>(&clock);
+
+        // Log transaction details
+        msg!("\n\nRefund after delay transaction successful");
         msg!("CUs Consumed: {}", tx.compute_units_consumed);
         msg!("Tx Signature: {}", tx.signature);
     }
