@@ -10,19 +10,17 @@ mod tests {
         anchor_spl::{
             associated_token::{self, spl_associated_token_account},
             token::spl_token,
+            token::spl_token::state::Account,
         },
         litesvm::{types::TransactionMetadata, LiteSVM},
         litesvm_token::{
             spl_token::ID as TOKEN_PROGRAM_ID, CreateAssociatedTokenAccount, CreateMint, MintTo,
         },
-        solana_account::Account,
-        solana_address::Address,
         solana_instruction::Instruction,
         solana_keypair::Keypair,
         solana_message::Message,
         solana_native_token::LAMPORTS_PER_SOL,
         solana_pubkey::Pubkey,
-        solana_rpc_client::rpc_client::RpcClient,
         solana_sdk_ids::system_program::ID as SYSTEM_PROGRAM_ID,
         solana_signer::Signer,
         solana_transaction::Transaction,
@@ -31,7 +29,7 @@ mod tests {
 
     static PROGRAM_ID: Pubkey = crate::ID;
 
-    pub struct SetupState {
+    pub struct TestData {
         payer: Keypair,
         maker: Pubkey,
         vault: Pubkey,
@@ -51,7 +49,10 @@ mod tests {
 
         // Airdrop some SOL to the payer keypair
         program
-            .airdrop(&payer.pubkey(), 10 * LAMPORTS_PER_SOL)
+            .airdrop(
+                &payer.pubkey(),
+                10u64.checked_mul(LAMPORTS_PER_SOL).unwrap(),
+            )
             .expect("Failed to airdrop SOL to payer");
 
         // Load program SO file
@@ -96,42 +97,43 @@ mod tests {
         (program, payer)
     }
 
-    fn setup_with_make() -> (LiteSVM, SetupState, TransactionMetadata) {
-        // Setup the test environment by initializing LiteSVM and creating a payer keypair
+    fn setup_with_make() -> (LiteSVM, TestData, TransactionMetadata) {
+        // Setup the test environment using the `setup` function
         let (mut program, payer) = setup();
 
         // Get the maker's public key from the payer keypair
         let maker = payer.pubkey();
 
-        // Create two mints (Mint A and Mint B) with 6 decimal places and the maker as the authority
+        // Create two mints (Mint A and Mint B) with 6 decimal places
+        // Make the `maker` as the authority
         // This done using litesvm-token's CreateMint utility which creates the mint in the LiteSVM environment
         let mint_a = CreateMint::new(&mut program, &payer)
             .decimals(6)
             .authority(&maker)
             .send()
             .unwrap();
-        msg!("Mint A: {}\n", mint_a);
+        // msg!("Mint A: {}", mint_a);
 
         let mint_b = CreateMint::new(&mut program, &payer)
             .decimals(6)
             .authority(&maker)
             .send()
             .unwrap();
-        msg!("Mint B: {}\n", mint_b);
+        // msg!("Mint B: {}", mint_b);
 
-        // Create the maker's associated token account for Mint A
+        // Create the maker's associated token account for Mint A and Mint B
         // This is done using litesvm-token's CreateAssociatedTokenAccount utility
         let maker_ata_a = CreateAssociatedTokenAccount::new(&mut program, &payer, &mint_a)
             .owner(&maker)
             .send()
             .unwrap();
-        msg!("Maker ATA A: {}\n", maker_ata_a);
+        // msg!("Maker ATA A: {}\n", maker_ata_a);
 
         let maker_ata_b = CreateAssociatedTokenAccount::new(&mut program, &payer, &mint_b)
             .owner(&maker)
             .send()
             .unwrap();
-        msg!("Maker ATA B: {}\n", maker_ata_b);
+        // msg!("Maker ATA B: {}\n", maker_ata_b);
 
         // Derive the PDA for the escrow account using the maker's public key and a seed value
         let escrow = Pubkey::find_program_address(
@@ -139,11 +141,11 @@ mod tests {
             &PROGRAM_ID,
         )
         .0;
-        msg!("Escrow PDA: {}\n", escrow);
+        // msg!("Escrow PDA: {}\n", escrow);
 
         // Derive the PDA for the vault associated token account using the escrow PDA and Mint A
         let vault = associated_token::get_associated_token_address(&escrow, &mint_a);
-        msg!("Vault PDA: {}\n", vault);
+        // msg!("Vault PDA: {}\n", vault);
 
         // Define program IDs for associated token program, token program, and system program
         let associated_token_program = spl_associated_token_account::ID;
@@ -187,35 +189,34 @@ mod tests {
         // Send the transaction and capture the result
         let tx = program.send_transaction(transaction).unwrap();
 
-        (
-            program,
-            SetupState {
-                payer,
-                maker,
-                vault,
-                escrow,
-                mint_a,
-                mint_b,
-                maker_ata_a,
-                maker_ata_b,
-            },
-            tx,
-        )
+        let test_data = TestData {
+            payer,
+            maker,
+            vault,
+            escrow,
+            mint_a,
+            mint_b,
+            maker_ata_a,
+            maker_ata_b,
+        };
+
+        (program, test_data, tx)
     }
 
     #[test]
     fn test_make() {
-        // setup with maker
-        let (program, setup_state, tx) = setup_with_make();
+        // Setup the maker and create an escrow using the "Make" instruction
+        let (program, test_data, tx) = setup_with_make();
 
-        let vault = setup_state.vault;
-        let escrow = setup_state.escrow;
-        let mint_a = setup_state.mint_a;
-        let maker = setup_state.maker;
-        let mint_b = setup_state.mint_b;
+        // Extract relevant data from the test setup
+        let vault = test_data.vault;
+        let escrow = test_data.escrow;
+        let mint_a = test_data.mint_a;
+        let maker = test_data.maker;
+        let mint_b = test_data.mint_b;
 
         // Log transaction details
-        msg!("\n\nMake transaction sucessful");
+        msg!("\nMake transaction sucessful");
         msg!("CUs Consumed: {}", tx.compute_units_consumed);
         msg!("Tx Signature: {}", tx.signature);
 
@@ -238,32 +239,40 @@ mod tests {
 
     #[test]
     fn test_take() {
-        let (mut program, setup_state, _tx) = setup_with_make();
+        // Setup the maker and create an escrow using the "Make" instruction
+        let (mut program, test_data, _tx) = setup_with_make();
 
+        // Extract relevant data from the test setup
+        let payer = test_data.payer;
+        let vault = test_data.vault;
+        let escrow = test_data.escrow;
+        let mint_a = test_data.mint_a;
+        let maker = test_data.maker;
+        let mint_b = test_data.mint_b;
+        let maker_ata_b = test_data.maker_ata_b;
+
+        // Create a taker keypair and airdrop some SOL to the taker for transaction fees
         let taker = Keypair::new();
-        let payer = setup_state.payer;
-        let vault = setup_state.vault;
-        let escrow = setup_state.escrow;
-        let mint_a = setup_state.mint_a;
-        let maker = setup_state.maker;
-        let mint_b = setup_state.mint_b;
-        let maker_ata_b = setup_state.maker_ata_b;
 
         program
-            .airdrop(&taker.pubkey(), 10 * LAMPORTS_PER_SOL)
+            .airdrop(
+                &taker.pubkey(),
+                10u64.checked_mul(LAMPORTS_PER_SOL).unwrap(),
+            )
             .expect("Failed to airdrop SOL to taker");
 
+        // Create the taker's associated token accounts for Mint A and Mint B
         let taker_ata_a = CreateAssociatedTokenAccount::new(&mut program, &taker, &mint_a)
             .owner(&taker.pubkey())
             .send()
             .unwrap();
-        msg!(">>> Taker ATA A: {}\n\n", taker_ata_a);
+        // msg!(">>> Taker ATA A: {}\n\n", taker_ata_a);
 
         let taker_ata_b = CreateAssociatedTokenAccount::new(&mut program, &taker, &mint_b)
             .owner(&taker.pubkey())
             .send()
             .unwrap();
-        msg!(">>> Taker ATA B: {}", taker_ata_b);
+        // msg!(">>> Taker ATA B: {}", taker_ata_b);
 
         // Define program IDs for associated token program, token program, and system program
         let associated_token_program = spl_associated_token_account::ID;
@@ -309,18 +318,50 @@ mod tests {
         msg!("\n\nTake transaction successful");
         msg!("CUs Consumed: {}", tx.compute_units_consumed);
         msg!("Tx Signature: {}", tx.signature);
+
+        // Verify the escrow account has been closed
+        let escrow_account = program.get_account(&escrow);
+        if let Some(account) = escrow_account {
+            assert_eq!(
+                account.lamports, 0,
+                "Escrow account should have 0 lamports after closure"
+            );
+            assert!(
+                account.data.is_empty() || account.data.iter().all(|&b| b == 0),
+                "Escrow account data should be empty or zeroed"
+            );
+        }
+
+        // Verify the vault account has been closed
+        let vault_account = program.get_account(&vault);
+        if let Some(account) = vault_account {
+            assert_eq!(
+                account.lamports, 0,
+                "Vault account should have 0 lamports after closure"
+            );
+        }
+
+        // Verify taker received the escrowed tokens (mint_a)
+        let taker_ata_a_account = program.get_account(&taker_ata_a).unwrap();
+        let taker_ata_a_data = Account::unpack(&taker_ata_a_account.data).unwrap();
+        assert_eq!(
+            taker_ata_a_data.amount, 10,
+            "Taker should have received 10 tokens of mint_a"
+        );
+        assert_eq!(taker_ata_a_data.owner, taker.pubkey());
+        assert_eq!(taker_ata_a_data.mint, mint_a);
     }
 
     #[test]
     fn test_refund() {
-        let (mut program, setup_state, _tx) = setup_with_make();
+        let (mut program, test_data, _tx) = setup_with_make();
 
-        let payer = setup_state.payer;
-        let maker = setup_state.maker;
-        let vault = setup_state.vault;
-        let escrow = setup_state.escrow;
-        let mint_a = setup_state.mint_a;
-        let maker_ata_a = setup_state.maker_ata_a;
+        let payer = test_data.payer;
+        let maker = test_data.maker;
+        let vault = test_data.vault;
+        let escrow = test_data.escrow;
+        let mint_a = test_data.mint_a;
+        let maker_ata_a = test_data.maker_ata_a;
 
         // Define program IDs for associated token program, token program, and system program
         let token_program = TOKEN_PROGRAM_ID;
@@ -355,24 +396,73 @@ mod tests {
         msg!("\n\nRefund transaction successful");
         msg!("CUs Consumed: {}", tx.compute_units_consumed);
         msg!("Tx Signature: {}", tx.signature);
+
+        // 1. Verify maker received their tokens back
+        let maker_ata_a_account = program.get_account(&maker_ata_a).unwrap();
+        let maker_ata_a_data =
+            spl_token::state::Account::unpack(&maker_ata_a_account.data).unwrap();
+        assert_eq!(
+            maker_ata_a_data.amount, 1000000000,
+            "Maker should have all their tokens back (original 1B)"
+        );
+
+        // 2. Verify escrow account has been closed
+        let escrow_account = program.get_account(&escrow);
+        if let Some(account) = escrow_account {
+            assert_eq!(
+                account.lamports, 0,
+                "Escrow account should have 0 lamports after refund"
+            );
+            assert!(
+                account.data.is_empty() || account.data.iter().all(|&b| b == 0),
+                "Escrow account data should be empty or zeroed"
+            );
+        }
+
+        // 3. Verify vault account has been closed
+        let vault_account = program.get_account(&vault);
+        if let Some(account) = vault_account {
+            assert_eq!(
+                account.lamports, 0,
+                "Vault account should have 0 lamports after refund"
+            );
+        }
     }
 
     #[test]
     fn test_refund_after_delay() {
-        let (mut program, setup_state, _tx) = setup_with_make();
+        let (mut program, test_data, _tx) = setup_with_make();
 
-        let payer = setup_state.payer;
-        let maker = setup_state.maker;
-        let vault = setup_state.vault;
-        let escrow = setup_state.escrow;
-        let mint_a = setup_state.mint_a;
-        let maker_ata_a = setup_state.maker_ata_a;
+        let payer = test_data.payer;
+        let maker = test_data.maker;
+        let vault = test_data.vault;
+        let escrow = test_data.escrow;
+        let mint_a = test_data.mint_a;
+        let maker_ata_a = test_data.maker_ata_a;
 
         // Define program IDs for associated token program, token program, and system program
         let token_program = TOKEN_PROGRAM_ID;
         let system_program = SYSTEM_PROGRAM_ID;
 
-        // Create the "Refund" instruction to accept and send tokens
+        // Time travel BEFORE attempting refund
+        let mut clock = program.get_sysvar::<Clock>();
+        let current_timestamp = clock.unix_timestamp;
+        let five_days = 5i64
+            .checked_mul(24)
+            .unwrap()
+            .checked_mul(60)
+            .unwrap()
+            .checked_mul(60)
+            .unwrap();
+        let time_jump = current_timestamp.checked_add(five_days).unwrap();
+
+        // Update timestamp to 5 days in the future
+        clock.unix_timestamp = time_jump;
+        program.set_sysvar::<Clock>(&clock);
+
+        msg!("\n\nTime travelled {} seconds into the future", five_days);
+
+        // Create the "Refund" instruction
         let refund_ix = Instruction {
             program_id: PROGRAM_ID,
             accounts: crate::accounts::Refund {
@@ -397,19 +487,40 @@ mod tests {
         // Send the transaction and capture the result
         let tx = program.send_transaction(transaction).unwrap();
 
-        // Time travelling
-        let mut clock = program.get_sysvar::<Clock>();
-        let current_timestamp = clock.unix_timestamp;
-        let five_days = 5 * 24 * 60 * 60;
-        let time_jump = current_timestamp + five_days;
-
-        // update timestamp
-        clock.unix_timestamp = time_jump;
-        program.set_sysvar::<Clock>(&clock);
-
         // Log transaction details
         msg!("\n\nRefund after delay transaction successful");
         msg!("CUs Consumed: {}", tx.compute_units_consumed);
         msg!("Tx Signature: {}", tx.signature);
+
+        // 1. Verify maker received their tokens back
+        let maker_ata_a_account = program.get_account(&maker_ata_a).unwrap();
+        let maker_ata_a_data =
+            spl_token::state::Account::unpack(&maker_ata_a_account.data).unwrap();
+        assert_eq!(
+            maker_ata_a_data.amount, 1000000000,
+            "Maker should have all their tokens back after time-locked refund"
+        );
+
+        // 2. Verify escrow account has been closed
+        let escrow_account = program.get_account(&escrow);
+        if let Some(account) = escrow_account {
+            assert_eq!(
+                account.lamports, 0,
+                "Escrow account should have 0 lamports after time-locked refund"
+            );
+            assert!(
+                account.data.is_empty() || account.data.iter().all(|&b| b == 0),
+                "Escrow account data should be empty or zeroed after time-locked refund"
+            );
+        }
+
+        // 3. Verify vault account has been closed
+        let vault_account = program.get_account(&vault);
+        if let Some(account) = vault_account {
+            assert_eq!(
+                account.lamports, 0,
+                "Vault account should have 0 lamports after time-locked refund"
+            );
+        }
     }
 }
