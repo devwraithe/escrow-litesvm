@@ -24,7 +24,7 @@ mod tests {
         solana_sdk_ids::system_program::ID as SYSTEM_PROGRAM_ID,
         solana_signer::Signer,
         solana_transaction::Transaction,
-        std::{future, path::PathBuf, str::FromStr},
+        std::path::PathBuf,
     };
 
     static PROGRAM_ID: Pubkey = crate::ID;
